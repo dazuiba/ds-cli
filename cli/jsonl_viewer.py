@@ -16,7 +16,10 @@ from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.await_complete import AwaitComplete
+from textual.geometry import Offset
 from textual.screen import Screen
+from textual.selection import Selection
+from textual.strip import Strip
 from textual.widgets import (
     Footer,
     Markdown,
@@ -87,6 +90,84 @@ class _DocumentMarkdown(Markdown):
             code = getattr(fence, "code", "")
             fence.styles.max_height = len(code.splitlines()) + 3
             fence.styles.overflow_y = "hidden"
+
+
+class _SelectableRichLog(RichLog):
+    """RichLog with Textual's mouse text-selection protocol enabled.
+
+    Textual 2.1's ``RichLog`` doesn't implement selection, even though the
+    plain ``Log`` widget does. The viewer needs Rich renderables for its styled
+    timestamps and events, so add the small missing selection layer here.
+    """
+
+    @property
+    def allow_select(self) -> bool:
+        return True
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        if not self.lines:
+            return "", "\n"
+
+        start = selection.start or Offset(0, 0)
+        last_y = len(self.lines) - 1
+        end = selection.end or Offset(self.lines[last_y].cell_length, last_y)
+        start, end = sorted((start, end), key=lambda offset: (offset.y, offset.x))
+
+        start_y = min(max(start.y - self._start_line, 0), last_y)
+        end_y = min(max(end.y - self._start_line, 0), last_y)
+        selected_lines: list[str] = []
+        for y in range(start_y, end_y + 1):
+            line = self.lines[y]
+            start_x = start.x if y == start_y else 0
+            end_x = end.x if y == end_y else line.cell_length
+            selected = line.crop(start_x, end_x).text
+            # RichLog pads each rendered line to its render width. Do not copy
+            # that layout-only padding when selection reaches a line ending.
+            if end_x >= line.cell_length:
+                selected = selected.rstrip()
+            selected_lines.append(selected)
+        return "\n".join(selected_lines), "\n"
+
+    def selection_updated(self, selection: Selection | None) -> None:
+        self._line_cache.clear()
+        self.refresh()
+
+    def _render_line(self, y: int, scroll_x: int, width: int) -> Strip:
+        if y >= len(self.lines):
+            return Strip.blank(width, self.rich_style)
+
+        selection = self.text_selection
+        key = (y + self._start_line, scroll_x, width, self._widest_line_width)
+        if selection is None and key in self._line_cache:
+            line = self._line_cache[key]
+        else:
+            line = self.lines[y]
+            if selection is not None:
+                span = selection.get_span(y + self._start_line)
+                if span is not None:
+                    start, end = span
+                    end = line.cell_length if end == -1 else end
+                    line = Strip.join(
+                        (
+                            line.crop(0, start),
+                            line.crop(start, end).apply_style(
+                                self.screen.get_component_rich_style(
+                                    "screen--selection"
+                                )
+                            ),
+                            line.crop(end),
+                        )
+                    )
+            line = line.crop_extend(
+                scroll_x,
+                scroll_x + width,
+                self.rich_style,
+            )
+            if selection is None:
+                self._line_cache[key] = line
+
+        # Selection offsets refer to the virtual document, not the viewport.
+        return line.apply_offsets(scroll_x, y + self._start_line)
 
 
 class JsonlViewerScreen(Screen):
@@ -169,9 +250,19 @@ class JsonlViewerScreen(Screen):
         with TabbedContent(initial=initial):
             if self._has_jsonl:
                 with TabPane("1 Stream JSONL", id="stream"):
-                    yield RichLog(id="stream_log", auto_scroll=False, highlight=False, markup=False)
+                    yield _SelectableRichLog(
+                        id="stream_log",
+                        auto_scroll=False,
+                        highlight=False,
+                        markup=False,
+                    )
             with TabPane("2 Output .out", id="output"):
-                yield RichLog(id="output_log", auto_scroll=False, highlight=False, markup=False)
+                yield _SelectableRichLog(
+                    id="output_log",
+                    auto_scroll=False,
+                    highlight=False,
+                    markup=False,
+                )
             with TabPane("3 Prompt", id="prompt"):
                 with VerticalScroll(id="prompt_scroll"):
                     yield Static("", id="prompt_header")
@@ -461,14 +552,14 @@ class JsonlViewerScreen(Screen):
         self.app.exit()
 
     def action_copy_session(self) -> None:
-        import subprocess
+        from .tui import _copy_selected_text
+
+        if _copy_selected_text(self):
+            return
         uid = self._r_info.get("uuid", "")
         if uid:
-            try:
-                subprocess.run(["pbcopy"], input=uid, text=True, check=True)
-                self.notify(f"Copied: {uid}", severity="information", timeout=3)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                self.notify("Copy failed: pbcopy not available", severity="error")
+            self.app.copy_to_clipboard(uid)
+            self.notify(f"Copied: {uid}", severity="information", timeout=3)
 
     def action_quit(self) -> None:
         self._keep_polling = False

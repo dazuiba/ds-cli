@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
+import subprocess
+import sys
 from typing import Optional, Callable
 
 from textual.app import App, ComposeResult, InvalidThemeError
@@ -12,6 +15,9 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, DataTable, Static
 from textual.binding import Binding
 from textual.coordinate import Coordinate
+from textual.geometry import Offset
+from textual.selection import Selection
+from textual.strip import Strip
 
 from .config import DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, read_tui_theme, write_tui_theme
 from .core import format_run_row, get_db, prompt_prefix, row_value, task_paths
@@ -42,6 +48,111 @@ INFO_COLUMN_WIDTH = 14
 INFO_COLUMN_MIN_WIDTH = 8
 PROMPT_COLUMN_MIN_WIDTH = 20
 TABLE_WIDTH_SLACK = 18
+
+
+def _copy_to_native_clipboard(text: str) -> bool:
+    """Copy text with a platform clipboard command when one is available.
+
+    Textual's clipboard implementation uses OSC 52, which isn't supported by
+    macOS Terminal. Keep OSC 52 as the app-level fallback, but also use the
+    native clipboard on local desktop sessions.
+    """
+    commands: list[list[str]] = []
+    if sys.platform == "darwin":
+        commands.append(["pbcopy"])
+    elif os.name == "nt":
+        commands.append(["clip.exe"])
+    else:
+        if os.environ.get("WAYLAND_DISPLAY"):
+            commands.append(["wl-copy"])
+        if os.environ.get("DISPLAY"):
+            commands.extend(
+                (["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"])
+            )
+
+    for command in commands:
+        if shutil.which(command[0]) is None:
+            continue
+        try:
+            subprocess.run(
+                command,
+                input=text,
+                text=True,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        return True
+    return False
+
+
+def _copy_selected_text(screen: Screen) -> bool:
+    """Copy the screen's mouse selection, returning whether it was non-empty."""
+    selected_text = screen.get_selected_text()
+    if not selected_text:
+        return False
+    screen.app.copy_to_clipboard(selected_text)
+    screen.notify(
+        f"Copied selected text ({len(selected_text)} chars)",
+        severity="information",
+        timeout=3,
+    )
+    return True
+
+
+class _SelectableDataTable(DataTable):
+    """DataTable that can copy a mouse-selected portion of its visible text."""
+
+    @property
+    def allow_select(self) -> bool:
+        return True
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        if self.size.height <= 0:
+            return "", "\n"
+
+        lines = [super().render_line(y) for y in range(self.size.height)]
+        start = selection.start or Offset(0, 0)
+        last_y = len(lines) - 1
+        end = selection.end or Offset(lines[last_y].cell_length, last_y)
+        start, end = sorted((start, end), key=lambda offset: (offset.y, offset.x))
+        start_y = min(max(start.y, 0), last_y)
+        end_y = min(max(end.y, 0), last_y)
+
+        selected_lines: list[str] = []
+        for y in range(start_y, end_y + 1):
+            line = lines[y]
+            start_x = start.x if y == start_y else 0
+            end_x = end.x if y == end_y else line.cell_length
+            selected = line.crop(start_x, end_x).text
+            if end_x >= line.cell_length:
+                selected = selected.rstrip()
+            selected_lines.append(selected)
+        return "\n".join(selected_lines), "\n"
+
+    def selection_updated(self, selection: Selection | None) -> None:
+        self.refresh()
+
+    def render_line(self, y: int) -> Strip:
+        line = super().render_line(y)
+        selection = self.text_selection
+        if selection is not None:
+            span = selection.get_span(y)
+            if span is not None:
+                start, end = span
+                end = line.cell_length if end == -1 else end
+                line = Strip.join(
+                    (
+                        line.crop(0, start),
+                        line.crop(start, end).apply_style(
+                            self.screen.get_component_rich_style("screen--selection")
+                        ),
+                        line.crop(end),
+                    )
+                )
+        return line.apply_offsets(0, y)
 
 
 class KillRunError(Exception):
@@ -201,6 +312,15 @@ class HandoffTuiApp(App):
     def apply_initial_theme(self) -> None:
         self._set_theme(self._initial_theme_name, quiet=False)
 
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy via Textual/OSC 52 and a native desktop clipboard when possible."""
+        super().copy_to_clipboard(text)
+        _copy_to_native_clipboard(text)
+
+    def on_mouse_up(self, event) -> None:
+        """Copy a completed app-level text selection without requiring a key chord."""
+        _copy_selected_text(self.screen)
+
     def _set_theme(self, theme_name: str, *, quiet: bool) -> str:
         try:
             self.theme = theme_name
@@ -230,7 +350,7 @@ class RunListScreen(Screen):
     Key bindings:
       Enter / →   — open detail view for the selected run
       O           — resume the selected run's session
-      C           — copy session UUID to clipboard
+      C           — copy selected text, or the session UUID if none is selected
       X           — kill the selected running task
       Q           — quit
     """
@@ -274,7 +394,7 @@ class RunListScreen(Screen):
         count = len(self._rows)
         run_label = "run" if count == 1 else "runs"
         yield Static(f" handoff runs  ·  {count} recent {run_label}", id="title_bar")
-        yield DataTable(id="run_table", cursor_type="row")
+        yield _SelectableDataTable(id="run_table", cursor_type="row")
         yield Static("", id="run_footer")
 
     def on_resize(self, event=None) -> None:
@@ -377,18 +497,16 @@ class RunListScreen(Screen):
         self.app.exit()
 
     def action_copy_session(self) -> None:
-        """Copy session UUID to clipboard."""
-        import subprocess
+        """Copy selected text, falling back to the session UUID."""
+        if _copy_selected_text(self):
+            return
         row = self._selected_row()
         if row is None:
             return
         uid = row["uuid"]
         if uid:
-            try:
-                subprocess.run(["pbcopy"], input=uid, text=True, check=True)
-                self.notify(f"Copied: {uid}", severity="information", timeout=3)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                self.notify("Copy failed: pbcopy not available", severity="error")
+            self.app.copy_to_clipboard(uid)
+            self.notify(f"Copied: {uid}", severity="information", timeout=3)
 
     def action_kill_run(self) -> None:
         """Confirm and kill the selected running task."""
