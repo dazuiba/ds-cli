@@ -32,8 +32,8 @@ def resolve_session_target(
     """Resolve a managed run or an explicit backend/session/cwd triple.
 
     ``session_id_arg is not None`` selects explicit mode and deliberately avoids
-    opening handoff.db. Managed mode inherits backend, cwd, and pro from the
-    selected run unless the corresponding CLI override is present.
+    opening handoff.db. Managed mode inherits backend and cwd from the selected
+    run, and pro from the latest run in that session, unless overridden.
     """
     prefix = f"handoff {command}"
 
@@ -72,8 +72,19 @@ def resolve_session_target(
 
         cwd = cwd_arg or row["cwd"]
         _require_cwd(prefix, cwd)
-        info = parse_runtime_info(row_value(row, "runtime_info", ""))
-        pro = bool(info.get("pro")) if pro_override is None else pro_override
+        if pro_override is None:
+            latest = conn.execute(
+                "SELECT runtime_info FROM runs "
+                "WHERE COALESCE(NULLIF(session_id, ''), uuid) = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            latest_info = parse_runtime_info(
+                row_value(latest, "runtime_info", "") if latest else ""
+            )
+            pro = bool(latest_info.get("pro"))
+        else:
+            pro = pro_override
         return SessionTarget(
             backend_name=saved_backend or backend_arg or config.default_backend,
             session_id=session_id,

@@ -11,11 +11,12 @@ from .run import _is_adopted_path
 
 def cmd_resume(argv: list[str], config: Config):
     """handoff resume [<run-id|seq>] [--backend <name>] [--session-id <id>]
-    [--slug <slug>] [--pro] [--cwd <dir>] [--verbose]
+    [--slug <slug>] [--pro] [--fast] [--cwd <dir>] [--verbose]
     (<input-file|-> | --text <prompt...>)."""
-    # Pre-scan --verbose so it works regardless of position (e.g. after --text).
+    # Pre-scan switches that should work regardless of position (e.g. after --text).
     verbose = "--verbose" in argv
-    filtered = [a for a in argv if a != "--verbose"]
+    fast = "--fast" in argv
+    filtered = [a for a in argv if a not in ("--verbose", "--fast")]
 
     pro = False
     cwd = ""
@@ -180,6 +181,7 @@ def cmd_resume(argv: list[str], config: Config):
         target.backend_name,
         target.pro,
         config,
+        fast=fast,
         resume_session_id=target.session_id,
         slug=slug_arg or "resume",
         adopted_run_id=adopted_run_id,

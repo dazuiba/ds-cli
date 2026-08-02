@@ -6,8 +6,16 @@ from cli.commands import session_target
 
 
 class _Connection:
-    def __init__(self):
+    def __init__(self, latest_runtime_info='{"pro":true}'):
         self.closed = False
+        self.latest_runtime_info = latest_runtime_info
+
+    def execute(self, query, params):
+        assert "ORDER BY created_at DESC" in query
+        assert params == ("session-1",)
+        return SimpleNamespace(
+            fetchone=lambda: {"runtime_info": self.latest_runtime_info}
+        )
 
     def close(self):
         self.closed = True
@@ -63,6 +71,28 @@ def test_managed_target_inherits_backend_cwd_and_pro(monkeypatch, tmp_path):
         cwd=str(tmp_path),
         pro=True,
     )
+    assert conn.closed is True
+
+
+def test_managed_target_reads_pro_from_latest_session_run(monkeypatch, tmp_path):
+    conn = _Connection(latest_runtime_info='{"pro":true,"fast":false}')
+    first_row = {
+        "uuid": "run-uuid",
+        "session_id": "session-1",
+        "backend": "codex",
+        "cwd": str(tmp_path),
+        "runtime_info": '{"pro":false,"fast":true}',
+    }
+    monkeypatch.setattr(session_target, "get_db", lambda: conn)
+    monkeypatch.setattr(session_target, "find_run", lambda actual, selector: first_row)
+
+    target = session_target.resolve_session_target(
+        _config(),
+        command="resume",
+        selector="first-run",
+    )
+
+    assert target.pro is True
     assert conn.closed is True
 
 

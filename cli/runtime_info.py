@@ -105,6 +105,7 @@ def update_runtime_info(
     usage: dict[str, Any] | None = None,
     model: str | None = None,
     pro: bool | None = None,
+    fast: bool | None = None,
     process_start_token: str | None = None,
 ) -> None:
     row = conn.execute("SELECT runtime_info FROM runs WHERE uuid = ?", (uid,)).fetchone()
@@ -126,6 +127,10 @@ def update_runtime_info(
         info["model"] = model
     if pro is not None:
         info["pro"] = bool(pro)
+    if fast is not None:
+        # Per-run display metadata only. Session resolution deliberately does
+        # not inherit this value; every resume must opt in with --fast again.
+        info["fast"] = bool(fast)
     conn.execute(
         "UPDATE runs SET runtime_info = ? WHERE uuid = ?",
         (dump_runtime_info(info), uid),

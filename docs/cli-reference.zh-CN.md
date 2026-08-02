@@ -7,7 +7,7 @@
 | 使用者 | 命令 | 用途 |
 | --- | --- | --- |
 | **你** | `list`/`ls` / `open` / `tail` / `env` / `init` | 看任务列表、重开会话、盯进度、查路径、初始化 |
-| **AI**（skill） | `run` / `resume` | 派发新任务、续接已有会话 |
+| **AI**（skill / custom agent） | `run` / `resume` | 派发新任务、续接已有会话 |
 
 ## 给你用的命令
 
@@ -67,27 +67,25 @@ handoff tail [<run-id|seq>]
 handoff init [-y|--yes]
 ```
 
-创建 `~/.handoff/config.yaml`（完整模板，填 token 即用），并链接 skill 文件：
+创建 `~/.handoff/config.yaml`（完整模板，填 token 即用），并链接宿主对应的集成文件：
 
-| 宿主 | 目标路径 | skills |
-| --- | --- | --- |
-| Claude Code | `~/.claude/skills/<name>/SKILL.md` | `handoff-ds`、`handoff-gemini`、`handoff-codex` |
-| Codex | `~/.codex/skills/<name>/SKILL.md` | `handoff-ds`、`handoff-gemini`、`handoff-codex`、`handoff-opus` |
+| 宿主 | 目标路径 | 类型 | 名称 |
+| --- | --- | --- | --- |
+| Claude Code | `~/.claude/skills/<name>/SKILL.md` | skill（软链接） | `handoff-ds`、`handoff-gemini`、`handoff-codex` |
+| Codex | `~/.codex/agents/<name>.toml` | custom agent（硬链接） | `handoff-ds`、`handoff-gemini`、`handoff-opus` |
 
-Claude Code 使用软链接，Codex 使用硬链接。`handoff-codex` 还会安装
-`~/.codex/skills/handoff-codex/agents/openai.yaml`，将其限制为显式调用。
-初始化时会停用旧版 `~/.codex/agents/handoff-*.toml`：文件不会被删除，而是同目录
-重命名为 `.toml.removed.bak`，并输出 warning；若备份名已存在，会追加数字后缀且不覆盖。
+从 v4.0.0 skills 集成迁移回来时，初始化会删除仍然指向 handoff 包内文件的
+`~/.codex/skills/handoff-*/SKILL.md`。同路径下的用户自有普通文件不会删除。
 
 `-y` / `--yes` 跳过交互确认。已存在的 config.yaml 不会被覆盖。
 
 ## AI 调用的命令
 
-你通常不直接敲这两个命令——skill 替你调用。这里只记录接口约定。
+你通常不直接敲这两个命令——Claude Code skill 或 Codex custom agent 替你调用。这里只记录接口约定。
 
 ```bash
-handoff run    [--backend <name>] [--cwd <dir>] [--pro] (<input-file|-> | --text <prompt...>)
-handoff resume [<run-id|seq>] [--backend <name>] [--session-id <id>] [--pro] [--cwd <dir>] (<input-file|-> | --text <prompt...>)
+handoff run    [--backend <name>] [--cwd <dir>] [--pro] [--fast] (<input-file|-> | --text <prompt...>)
+handoff resume [<run-id|seq>] [--backend <name>] [--session-id <id>] [--pro] [--fast] [--cwd <dir>] (<input-file|-> | --text <prompt...>)
 ```
 
 | | run | resume |
@@ -95,7 +93,8 @@ handoff resume [<run-id|seq>] [--backend <name>] [--session-id <id>] [--pro] [--
 | 作用 | 开新会话派发任务 | 把任务派进**已有会话**（上下文全保留） |
 | 目标选择 | `--backend <name>`，省略用 `backends` 第一个条目 | 沿用原会话的 backend（session id 只对创建它的 CLI 有意义；显式指定不符会报错） |
 | prompt 来源 | 文件 / `-`（stdin、heredoc）/ `--text` | 同左；prompt 必填，无 prompt 请使用 `handoff open` |
-| `--pro` | 用该 backend 的 `pro_model` | 数据库目标自动继承原 run；外部 session 可显式指定 |
+| `--pro` | 用该 backend 的 `pro_model` | managed resume 自动继承该 session 最新一轮；外部 session 可显式指定 |
+| `--fast` | 为本轮 Codex 调用启用 Fast Mode | 不继承；每次 resume 都必须显式指定 |
 | 会话句柄 | 新 run_id（如 `hd-0611-03`） | 每轮分配新 run_id，但底层 session_id 始终不变；后续可用任一同会话 run 定位 |
 
 恢复一个从未写入 `handoff.db` 的原生会话时，显式传入 backend、session id 和 cwd：
@@ -145,4 +144,4 @@ run_id 格式：`hd-<MMDD>-<SEQ_CODE>`。
 | `error` | 执行失败、未产出有效结果，或受管进程已经不存在 |
 | `interrupted` | 被 `Ctrl-C` 中断 |
 
-TUI 挂载 3 秒后首次核对所有 `running` 记录，之后复用每 5 秒一次的正常刷新。进程组不存在或 PID 已被另一个启动时间不同的进程复用时，状态直接转为 `error`，`runtime_info.error_reason` 记为 `process_missing`，INFO 列显示 `proc-lost`。
+TUI 挂载 3 秒后首次核对所有 `running` 记录，之后复用每 5 秒一次的正常刷新。进程组不存在或 PID 已被另一个启动时间不同的进程复用时，状态直接转为 `error`，`runtime_info.error_reason` 记为 `process_missing`，STATUS 列显示 `error|lost`。

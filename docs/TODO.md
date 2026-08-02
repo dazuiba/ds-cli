@@ -25,8 +25,8 @@ init 重置为模板（旧 opencode 配置在 `config.yaml.bak`，需要的话�
 docs/configuration.zh-CN.md 的示例）。
 
 - [ ] 把 opencode 配置从 `config.yaml.bak` 合回 `config.yaml`（或填 DEEPSEEK_API_KEY 走官方 API）
-- [ ] 实战验证三个 skill：在 Claude Code 真实派发 `/handoff-ds`、`/handoff-codex`、`/handoff-opus` 各一次
-- [ ] Codex 侧验证 `handoff-ds` skill（`~/.codex/skills/handoff-ds/SKILL.md`，prompt-file 机制未实战跑过）
+- [ ] 实战验证三个 skill：在 Claude Code 真实派发 `/handoff-ds`、`/handoff-gemini`、`/handoff-codex` 各一次
+- [ ] Codex 侧实战验证 `handoff-ds`、`handoff-gemini`、`handoff-opus` 三个 custom agents（`~/.codex/agents/handoff-*.toml`）
 - [ ] 验证交互式 codex 重开（`handoff open <codex-seq>` → `codex resume <id>`，从未人工测过）
 - [ ] 退役死装置：`~/.claude/skills/ds-cli/`（其依赖的 `~/.ds-cli` 已不存在，skill 已不可用）、
   `~/bin/ds-cli`、旧 checkout `~/dev/github/ds-cli`（merge 后即冗余）；

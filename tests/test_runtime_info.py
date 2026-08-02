@@ -220,6 +220,20 @@ def test_clearing_pid_also_clears_process_identity():
     assert parse_runtime_info(_run(conn)["runtime_info"]) == {}
 
 
+def test_runtime_info_records_fast_for_current_run():
+    conn = _runtime_db()
+    _insert_running(conn)
+
+    update_runtime_info(conn, "run-1", model="gpt-5.6", pro=True, fast=False)
+    conn.commit()
+
+    assert parse_runtime_info(_run(conn)["runtime_info"]) == {
+        "fast": False,
+        "model": "gpt-5.6",
+        "pro": True,
+    }
+
+
 def test_reconcile_conditional_error_update_and_idempotence(monkeypatch):
     conn = _runtime_db()
     _insert_running(conn, info={"pid": 123})

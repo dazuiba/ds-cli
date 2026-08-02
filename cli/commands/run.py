@@ -58,11 +58,12 @@ def _with_codex_bypass(args: list[str], backend_kind: str) -> list[str]:
 
 
 def cmd_run(argv: list[str], config: Config):
-    """handoff run [--backend <name>] [--cwd <dir>] [--slug <slug>] [--pro] [--verbose] [--dry-run] (<input-file|-> | --text <prompt...>)."""
+    """handoff run [--backend <name>] [--cwd <dir>] [--slug <slug>] [--pro] [--fast] [--verbose] [--dry-run] (<input-file|-> | --text <prompt...>)."""
     # Pre-scan flags that should work regardless of position (e.g. after --text).
     verbose = "--verbose" in argv
     dry_run = "--dry-run" in argv
-    filtered = [a for a in argv if a not in ("--verbose", "--dry-run")]
+    fast = "--fast" in argv
+    filtered = [a for a in argv if a not in ("--verbose", "--dry-run", "--fast")]
 
     pro = False
     cwd = ""
@@ -205,6 +206,7 @@ def cmd_run(argv: list[str], config: Config):
         backend_name,
         pro,
         config,
+        fast=fast,
         slug=slug,
         adopted_run_id=adopted_run_id,
         verbose=verbose,
@@ -218,6 +220,7 @@ def _execute(
     backend_name: str,
     pro: bool,
     config: Config,
+    fast: bool = False,
     resume_session_id: str | None = None,
     slug: str = "task",
     adopted_run_id: str | None = None,
@@ -263,6 +266,9 @@ def _execute(
     model_reasoning_effort = resolve_backend_reasoning_effort(backend_cfg, pro)
     backend_cfg["_resolved_model_reasoning_effort"] = model_reasoning_effort
     btype = backend_type(backend_cfg)
+    if fast and btype != "codex":
+        print("handoff: --fast is only supported by codex backends", file=sys.stderr)
+        sys.exit(2)
 
     if dry_run:
         session_id = (
@@ -279,6 +285,7 @@ def _execute(
             model=model,
             pro_model=backend_cfg.get("pro_model", ""),
             model_reasoning_effort=model_reasoning_effort,
+            fast=fast,
             resume=bool(resume_session_id),
             cwd=cwd,
         )
@@ -293,6 +300,7 @@ def _execute(
         print(f"TYPE={btype}")
         print(f"MODEL={model}")
         print(f"PRO={'true' if pro else 'false'}")
+        print(f"FAST={'true' if fast else 'false'}")
         print(f"CWD={cwd}")
         print(f"SESSION={session_id or 'pending'}")
         print(f"CMD: {format_shell_command(cwd, cmd, unset_keys, set_env)}")
@@ -330,7 +338,7 @@ def _execute(
         with open(prompt_path, "w", encoding="utf-8") as pf:
             pf.write(prompt_text)
 
-    update_runtime_info(conn, uid, model=model, pro=pro)
+    update_runtime_info(conn, uid, model=model, pro=pro, fast=fast)
     conn.commit()
 
     set_backend_env(backend_cfg, model, backend_cfg.get("pro_model", ""))
@@ -355,6 +363,7 @@ def _execute(
         model=model,
         pro_model=backend_cfg.get("pro_model", ""),
         model_reasoning_effort=model_reasoning_effort,
+        fast=fast,
         resume=bool(resume_session_id),
         cwd=cwd,
     )

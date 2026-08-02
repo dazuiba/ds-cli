@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from cli.commands import open as open_command
-from cli.commands import resume, session_target
+from cli.commands import resume, run, session_target
 
 
 class _InteractiveStdin(io.StringIO):
@@ -68,6 +68,7 @@ def test_external_session_with_prompt_enters_run_pipeline(monkeypatch, tmp_path)
             prompt=prompt,
             backend=backend,
             pro=pro,
+            fast=kwargs["fast"],
             resume_session_id=kwargs["resume_session_id"],
             slug=kwargs["slug"],
         )
@@ -77,10 +78,11 @@ def test_external_session_with_prompt_enters_run_pipeline(monkeypatch, tmp_path)
 
     resume.cmd_resume(
         [
-            "--backend=opus",
+            "--backend=codex",
             "--session-id=external-session",
             "--cwd",
             str(tmp_path),
+            "--fast",
             "--slug",
             "follow-up",
             "--text",
@@ -93,10 +95,66 @@ def test_external_session_with_prompt_enters_run_pipeline(monkeypatch, tmp_path)
     assert executed == {
         "cwd": str(tmp_path),
         "prompt": "continue the task",
-        "backend": "opus",
+        "backend": "codex",
         "pro": False,
+        "fast": True,
         "resume_session_id": "external-session",
         "slug": "follow-up",
+    }
+
+
+def test_resume_defaults_fast_off_for_each_invocation(monkeypatch, tmp_path):
+    executed = {}
+
+    def fail_get_db():
+        raise AssertionError("external session resolution must not open handoff.db")
+
+    def fake_execute(cwd, prompt, backend, pro, config, **kwargs):
+        executed.update(fast=kwargs["fast"], pro=pro)
+
+    monkeypatch.setattr(session_target, "get_db", fail_get_db)
+    monkeypatch.setattr("cli.commands.run._execute", fake_execute)
+
+    resume.cmd_resume(
+        [
+            "--backend=codex",
+            "--session-id=external-session",
+            "--cwd",
+            str(tmp_path),
+            "--text",
+            "continue without fast",
+        ],
+        _config(),
+    )
+
+    assert executed == {"fast": False, "pro": False}
+
+
+def test_run_forwards_fast_as_per_invocation_switch(monkeypatch, tmp_path):
+    executed = {}
+
+    def fake_execute(cwd, prompt, backend, pro, config, **kwargs):
+        executed.update(
+            cwd=cwd,
+            prompt=prompt,
+            backend=backend,
+            pro=pro,
+            fast=kwargs["fast"],
+        )
+
+    monkeypatch.setattr(run, "_execute", fake_execute)
+
+    run.cmd_run(
+        ["--backend=codex", "--cwd", str(tmp_path), "--text", "do it", "--fast"],
+        _config(),
+    )
+
+    assert executed == {
+        "cwd": str(tmp_path),
+        "prompt": "do it",
+        "backend": "codex",
+        "pro": False,
+        "fast": True,
     }
 
 

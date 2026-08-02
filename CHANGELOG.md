@@ -1,5 +1,20 @@
 # 更新日志
 
+## [v4.0.2] - 2026-08-02
+
+- Codex 派发恢复为 `~/.codex/agents/handoff-ds.toml`、`handoff-gemini.toml`
+  和 `handoff-opus.toml` custom agents，由 subagent 完成事件通知父会话。
+- `handoff init` 不再向 Codex 安装 handoff skills，并清理仍指向本包的 v4.0.0
+  Codex skill 链接；Claude Code 继续使用后台 shell skills。
+- `handoff run` / `handoff resume` 新增 Codex `--fast`，仅对本轮启用 Fast Mode，
+  并在运行记录和 TUI INFO 列显示 `Fast`。
+- managed resume 的 Pro 状态改为继承同一 session 最新一轮；Fast 不继承，续接时
+  必须再次显式指定。
+- TUI 的 STATUS 列使用 `error|lost` 标识进程失联，INFO 列完整显示 resume、Pro、
+  Fast 信息且不再省略；详情页支持复制鼠标选中的文本。
+- 新增 `make agents` / `make generated`，在开发阶段生成 backend 变体；Codex Fast
+  参数协议保持为独立 skill 文档，避免被通用模板覆盖。
+
 ## [v4.0.1] - 2026-07-29
 
 - 修复 `handoff list` 详情页 Prompt/Result 标签无法稳定使用鼠标或触控板滚动的问题。
@@ -29,5 +44,6 @@
   剩余子进程。
 - 新增 CLI 架构文档，说明模块职责、依赖关系、运行数据流与持久化结构。
 
+[v4.0.2]: https://github.com/dazuiba/handoff/compare/v4.0.1...v4.0.2
 [v4.0.1]: https://github.com/dazuiba/handoff/compare/v4.0.0...v4.0.1
 [v4.0.0]: https://github.com/dazuiba/handoff/compare/v0.3.9...v4.0.0

@@ -15,8 +15,8 @@ def usage(config=None):
   handoff new       --backend <name> [--slug <slug>] [--write]
   handoff list|ls   [<run-id|seq>] [--uuid] [--cwd] [--follow]
   handoff open      [<run-id|seq>] [--backend <name>] [--session-id <id>] [--pro] [--cwd <dir>] [--verbose]
-  handoff run       [--backend <name>] [--cwd <dir>] [--slug <slug>] [--pro] [--verbose] [--dry-run] (<input-file|-> | --text <prompt...>)
-  handoff resume    [<run-id|seq>] [--backend <name>] [--session-id <id>] [--slug <slug>] [--pro] [--cwd <dir>] [--verbose] (<input-file|-> | --text <prompt...>)
+  handoff run       [--backend <name>] [--cwd <dir>] [--slug <slug>] [--pro] [--fast] [--verbose] [--dry-run] (<input-file|-> | --text <prompt...>)
+  handoff resume    [<run-id|seq>] [--backend <name>] [--session-id <id>] [--slug <slug>] [--pro] [--fast] [--cwd <dir>] [--verbose] (<input-file|-> | --text <prompt...>)
   handoff tail [<run-id|seq>]
 
   handoff env              — print config / data paths (works even with broken config)
@@ -40,7 +40,8 @@ Run ids: <mmdd>-<backend2>-<SEQ_CODE>-<slug>  (e.g. 0611-ds-03-fix-auth)
 --backend picks a backend (default: first entry in config.yaml backends).
 --slug sets the semantic suffix in generated run ids.
 --write on `handoff new` writes stdin to the pre-allocated .prompt.md file.
---pro uses the backend's pro_model. Managed open/resume inherit the original run's pro setting."""
+--pro uses the backend's pro_model. Managed open/resume inherit the session's latest pro setting.
+--fast enables Codex Fast Mode for this run/resume only; it is off by default."""
     )
 
 

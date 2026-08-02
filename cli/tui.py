@@ -45,7 +45,6 @@ CWD_COLUMN_MIN_WIDTH = 6
 FULL_CWD_COLUMN_WIDTH = 28
 FULL_CWD_COLUMN_MIN_WIDTH = 8
 INFO_COLUMN_WIDTH = 14
-INFO_COLUMN_MIN_WIDTH = 8
 PROMPT_COLUMN_MIN_WIDTH = 20
 TABLE_WIDTH_SLACK = 18
 
@@ -582,14 +581,14 @@ class RunListScreen(Screen):
         widths = {
             "run": RUN_COLUMN_WIDTH,
             "date": DATE_COLUMN_WIDTH,
-            "status": STATUS_COLUMN_WIDTH,
+            "status": self._status_column_width(),
             "cwd": cwd_width,
-            "info": INFO_COLUMN_WIDTH,
+            "info": self._info_column_width(),
         }
         mins = {
             "date": DATE_COLUMN_MIN_WIDTH,
             "cwd": cwd_min,
-            "info": INFO_COLUMN_MIN_WIDTH,
+            "info": self._info_column_width(),
             "run": RUN_COLUMN_MIN_WIDTH,
         }
 
@@ -598,7 +597,7 @@ class RunListScreen(Screen):
         prompt_width = available - fixed
         if prompt_width < PROMPT_COLUMN_MIN_WIDTH:
             needed = PROMPT_COLUMN_MIN_WIDTH - prompt_width
-            for key in ("date", "cwd", "info", "run"):
+            for key in ("date", "cwd", "run"):
                 reducible = max(0, widths[key] - mins[key])
                 take = min(reducible, needed)
                 widths[key] -= take
@@ -628,9 +627,9 @@ class RunListScreen(Screen):
         table.add_row(
             self._run_for_row(fmt["id"], row, widths["run"]),
             self._date_for_row(fmt["date"], widths["date"]),
-            self._clip(fmt.get("status", ""), widths["status"]),
+            self._status_for_row(row),
             self._clip(fmt["cwd"], widths["cwd"]),
-            self._clip(self._info_for_row(row), widths["info"]),
+            self._info_for_row(row),
             self._prompt_for_row(row),
             key=fmt["id"],
         )
@@ -684,6 +683,11 @@ class RunListScreen(Screen):
         return bool(info.get("pro"))
 
     @staticmethod
+    def _row_is_fast(row) -> bool:
+        info = parse_runtime_info(row_value(row, "runtime_info", ""))
+        return bool(info.get("fast"))
+
+    @staticmethod
     def _compact_count(value: int) -> str:
         if value >= 1_000_000:
             return f"{int(value / 1_000_000)}M"
@@ -707,11 +711,30 @@ class RunListScreen(Screen):
         input_tokens = int(usage.get("input_tokens") or 0)
         return self._compact_count(input_tokens) if input_tokens else ""
 
+    @staticmethod
+    def _status_for_row(row) -> str:
+        status = row_value(row, "status", "") or ""
+        info = parse_runtime_info(row_value(row, "runtime_info", ""))
+        if status == "error" and info.get("error_reason") == "process_missing":
+            return "error|lost"
+        return status
+
+    def _status_column_width(self) -> int:
+        """Keep STATUS wide enough for the full status and reason."""
+        return max(
+            [STATUS_COLUMN_WIDTH]
+            + [len(self._status_for_row(row)) for row in self._rows]
+        )
+
+    def _info_column_width(self) -> int:
+        """Keep INFO wide enough for every row; never ellipsize its contents."""
+        return max(
+            [INFO_COLUMN_WIDTH]
+            + [len(self._info_for_row(row)) for row in self._rows]
+        )
+
     def _info_for_row(self, row) -> str:
         parts = []
-        info = parse_runtime_info(row_value(row, "runtime_info", ""))
-        if row["status"] == "error" and info.get("error_reason") == "process_missing":
-            parts.append("proc-lost")
         context_size = self._context_size_for_row(row)
         if context_size:
             parts.append(context_size)
@@ -721,7 +744,8 @@ class RunListScreen(Screen):
             parts.append(f"↩{self._run_id_prefix(first_run_id)}")
         if self._row_is_pro(row):
             parts.append("Pro")
-
+        if self._row_is_fast(row):
+            parts.append("Fast")
         return "|".join(parts)
 
     def _prompt_for_row(self, row) -> str:

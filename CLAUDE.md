@@ -31,8 +31,11 @@ cli/
 └── skills/
     ├── handoff-ds/SKILL.md   # Claude Code skill → deepseek backend
     ├── handoff-codex/SKILL.md# Claude Code skill → codex backend
-    ├── handoff-opus/SKILL.md # Claude Code skill → opus backend
-    └── handoff-ds.toml       # Codex subagent definition → deepseek backend
+    ├── handoff-gemini/SKILL.md# Claude Code skill → gemini backend
+    ├── handoff-opus/SKILL.md # Shared generated skill source (not installed into Claude)
+    ├── handoff-ds.toml       # Codex custom agent → deepseek backend (master)
+    ├── handoff-gemini.toml   # Generated Codex custom agent → gemini backend
+    └── handoff-opus.toml     # Generated Codex custom agent → opus backend
 ```
 
 ## How to release

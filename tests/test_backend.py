@@ -85,6 +85,31 @@ def test_codex_resume_keeps_developer_instructions_out_of_user_prompt():
     ]
 
 
+def test_codex_fast_service_tier_is_inserted_before_prompt():
+    backend = _codex_backend()
+
+    args = build_args(backend, "hello", model="gpt-5.6", fast=True, cwd="/repo")
+
+    assert args[-5:] == [
+        "-c", "features.fast_mode=true",
+        "-c", 'service_tier="fast"',
+        "hello",
+    ]
+
+
+def test_codex_fast_service_tier_is_forwarded_on_noninteractive_resume():
+    backend = _codex_backend()
+
+    args = build_args(backend, "hello", session_id="session-1", fast=True, resume=True)
+
+    assert args == [
+        "codex", "exec", "resume", "--json", "session-1",
+        "-c", "features.fast_mode=true",
+        "-c", 'service_tier="fast"',
+        "hello",
+    ]
+
+
 def test_interactive_codex_open_uses_resume_subcommand_without_prompt():
     backend = _codex_backend(resume_flags=["resume", "{session_id}"])
 

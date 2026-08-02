@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "handoff-cli"
-version = "4.0.0"
+version = "4.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },

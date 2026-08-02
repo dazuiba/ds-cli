@@ -41,103 +41,104 @@ def _bundled_skill_names(skills_dir: str) -> list[str]:
     )
 
 
-# Where each host looks for skills.
-_HOST_SKILL_DIRS = {
-    "claude": (".claude", "skills"),
-    "codex": (".codex", "skills"),
-}
+def _bundled_agent_names(skills_dir: str) -> list[str]:
+    """Every bundled Codex custom agent — a top-level handoff-*.toml file."""
+    return sorted(
+        os.path.splitext(name)[0]
+        for name in os.listdir(skills_dir)
+        if name.startswith("handoff-") and name.endswith(".toml")
+    )
 
-# Codex skills must be regular-file hard links. Claude Code keeps symlinks so
-# the editable source relationship remains visible there.
-_HOST_LINK_KINDS = {
-    "claude": "soft link",
-    "codex": "hard link",
-}
 
-# A host must not see the skill that dispatches to its own model: the names
-# collide and the model reads "ask Opus" as "dispatch a background handoff run".
-_HOST_EXCLUDED_SKILLS = {
-    "claude": {"handoff-opus"},
-    "codex": set(),
-}
+# Claude Code gets skills backed by its background-shell completion events.
+# Codex gets custom agents, whose completion events wake the parent thread.
+_CLAUDE_SKILL_DIR = (".claude", "skills")
+_CODEX_AGENT_DIR = (".codex", "agents")
+
+# Do not install a skill that dispatches to the host's own model.
+_CLAUDE_EXCLUDED_SKILLS = {"handoff-opus"}
 
 
 def _planned_links():
     """Return (kind, src, dest) tuples for link files only (no config)."""
     skills_dir = os.path.join(_pkg_root(), "skills")
     links = []
-    for host in sorted(_HOST_SKILL_DIRS):
-        for skill_name in _bundled_skill_names(skills_dir):
-            if skill_name in _HOST_EXCLUDED_SKILLS[host]:
-                continue
-            links.append((
-                _HOST_LINK_KINDS[host],
-                os.path.join(skills_dir, skill_name, "SKILL.md"),
-                _home_path(*_HOST_SKILL_DIRS[host], skill_name, "SKILL.md"),
-            ))
+    for skill_name in _bundled_skill_names(skills_dir):
+        if skill_name in _CLAUDE_EXCLUDED_SKILLS:
+            continue
+        links.append((
+            "soft link",
+            os.path.join(skills_dir, skill_name, "SKILL.md"),
+            _home_path(*_CLAUDE_SKILL_DIR, skill_name, "SKILL.md"),
+        ))
 
-            # Codex may invoke handoff-codex only when the user explicitly
-            # mentions $handoff-codex. This metadata is intentionally not
-            # installed for any other handoff skill or host.
-            if host == "codex" and skill_name == "handoff-codex":
-                metadata_parts = ("agents", "openai.yaml")
-                links.append((
-                    "hard link",
-                    os.path.join(skills_dir, skill_name, *metadata_parts),
-                    _home_path(
-                        *_HOST_SKILL_DIRS[host], skill_name, *metadata_parts
-                    ),
-                ))
+    for agent_name in _bundled_agent_names(skills_dir):
+        filename = f"{agent_name}.toml"
+        links.append((
+            "hard link",
+            os.path.join(skills_dir, filename),
+            _home_path(*_CODEX_AGENT_DIR, filename),
+        ))
     return links
 
 
-def _excluded_skill_links():
-    """Previously-installed links for skills a host must no longer see.
+def _is_bundled_link(src: str, dest: str) -> bool:
+    """Whether dest is a managed link/copy of this bundled handoff skill."""
+    linked = (
+        os.path.islink(dest)
+        and os.path.realpath(dest) == os.path.realpath(src)
+    ) or (
+        not os.path.islink(dest)
+        and os.path.isfile(dest)
+        and os.path.samefile(src, dest)
+    )
+    if linked:
+        return True
+    if not os.path.isfile(dest):
+        return False
 
-    Only links to our bundled SKILL.md files are reported — a real file the
-    user put there is left alone. Both symlinks and hard links are recognized.
+    # Package upgrades can replace the source inode while a v4 hard link keeps
+    # pointing at the previous wheel's inode. Recognize that managed copy by
+    # its deliberately host-specific contract, without deleting arbitrary
+    # user files that merely reuse the same path.
+    skill_name = os.path.basename(os.path.dirname(src))
+    try:
+        with open(dest, encoding="utf-8") as installed:
+            text = installed.read()
+    except (OSError, UnicodeError):
+        return False
+    return all((
+        f"name: {skill_name}" in text,
+        "This skill is executed by Claude Code" in text,
+        "handoff new --backend" in text,
+        "<interaction_contract>" in text,
+    ))
+
+
+def _superseded_skill_links():
+    """Bundled skill links that this host split no longer installs.
+
+    Claude's self-dispatch skill remains excluded. All Codex skill links from
+    v4.0.0 are superseded by custom agents. User-owned regular files are left
+    alone; only links to this package's bundled files are reported.
     """
     skills_dir = os.path.join(_pkg_root(), "skills")
     stale = []
-    for host, excluded in sorted(_HOST_EXCLUDED_SKILLS.items()):
-        for skill_name in sorted(excluded):
-            src = os.path.join(skills_dir, skill_name, "SKILL.md")
-            dest = _home_path(*_HOST_SKILL_DIRS[host], skill_name, "SKILL.md")
-            is_our_symlink = (
-                os.path.islink(dest)
-                and os.path.realpath(dest).startswith(skills_dir + os.sep)
-            )
-            is_our_hardlink = (
-                not os.path.islink(dest)
-                and os.path.isfile(dest)
-                and os.path.samefile(src, dest)
-            )
-            if is_our_symlink or is_our_hardlink:
-                stale.append(dest)
-    return stale
-
-
-def _legacy_agent_files():
-    """Codex `.toml` subagents installed before the skills migration."""
-    agents_dir = _home_path(".codex", "agents")
-    if not os.path.isdir(agents_dir):
-        return []
-    return [
-        os.path.join(agents_dir, name)
-        for name in sorted(os.listdir(agents_dir))
-        if name.startswith("handoff-") and name.endswith(".toml")
+    stale_targets = [
+        (skill_name, _CLAUDE_SKILL_DIR)
+        for skill_name in sorted(_CLAUDE_EXCLUDED_SKILLS)
     ]
+    stale_targets.extend(
+        (skill_name, (".codex", "skills"))
+        for skill_name in _bundled_skill_names(skills_dir)
+    )
 
-
-def _legacy_agent_backup_path(path: str) -> str:
-    """Choose a backup name without overwriting an earlier migration."""
-    base = f"{path}.removed.bak"
-    candidate = base
-    suffix = 1
-    while os.path.lexists(candidate):
-        candidate = f"{base}.{suffix}"
-        suffix += 1
-    return candidate
+    for skill_name, host_dir in stale_targets:
+        src = os.path.join(skills_dir, skill_name, "SKILL.md")
+        dest = _home_path(*host_dir, skill_name, "SKILL.md")
+        if _is_bundled_link(src, dest):
+            stale.append(dest)
+    return stale
 
 
 def _print_plan():
@@ -151,18 +152,11 @@ def _print_plan():
     for kind, src, dest in links:
         print(f"  {kind}: {_short(dest)} -> {_short(src)}")
 
-    stale_links = _excluded_skill_links()
+    stale_links = _superseded_skill_links()
     if stale_links:
         print("\nThe following superseded links will be removed:")
         for path in stale_links:
             print(f"  remove: {_short(path)}")
-
-    legacy_agents = _legacy_agent_files()
-    if legacy_agents:
-        print("\nThe following legacy Codex agents will be backed up:")
-        for path in legacy_agents:
-            backup = _legacy_agent_backup_path(path)
-            print(f"  move: {_short(path)} -> {_short(backup)}")
 
     config_path = user_config_path()
     if os.path.isfile(config_path):
@@ -183,7 +177,7 @@ def _confirm() -> bool:
 
 
 def _create_links():
-    """Install every planned skill link and migrate superseded integrations.
+    """Install every planned integration link and remove superseded skills.
 
     Consumes `_planned_links()` directly so what `handoff init` previews is
     exactly what it writes.
@@ -200,7 +194,7 @@ def _create_links():
         link_functions[kind](src, dest)
 
     removed = 0
-    for stale in _excluded_skill_links():
+    for stale in _superseded_skill_links():
         os.remove(stale)
         removed += 1
         # Drop the skill's directory too, once its SKILL.md is gone.
@@ -208,28 +202,9 @@ def _create_links():
         if os.path.basename(stale) == "SKILL.md" and not os.listdir(parent):
             os.rmdir(parent)
 
-    moved_agents = []
-    for legacy in _legacy_agent_files():
-        backup = _legacy_agent_backup_path(legacy)
-        os.rename(legacy, backup)
-        moved_agents.append((legacy, backup))
-
-    print(f"✓ Created {len(links)} skill links")
+    print(f"✓ Created {len(links)} integration links")
     if removed:
         print(f"✓ Removed {removed} superseded links")
-    if moved_agents:
-        print(
-            _color(
-                "1;33",
-                "WARNING: Legacy Codex agent files were disabled and backed up:",
-            ),
-            file=sys.stderr,
-        )
-        for legacy, backup in moved_agents:
-            print(
-                f"  {_short(legacy)} -> {_short(backup)}",
-                file=sys.stderr,
-            )
 
 
 def run_init(assume_yes: bool = False):

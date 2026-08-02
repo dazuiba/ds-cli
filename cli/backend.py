@@ -73,6 +73,16 @@ def backend_type(backend: dict) -> str:
     return backend.get("type", "claude")
 
 
+def _codex_fast_mode_args(enabled: bool) -> list[str]:
+    """Translate handoff's per-run --fast switch into Codex config overrides."""
+    if not enabled:
+        return []
+    return [
+        "-c", "features.fast_mode=true",
+        "-c", 'service_tier="fast"',
+    ]
+
+
 # Inherited values of these would silently redirect a claude-type backend to
 # whatever endpoint/model the *calling* session uses. handoff is routinely
 # invoked from inside another claude session (e.g. dispatching opus from a
@@ -143,6 +153,7 @@ def build_args(
     model: Optional[str] = None,
     pro_model: Optional[str] = None,
     model_reasoning_effort: Optional[str] = None,
+    fast: bool = False,
     resume: bool = False,
     cwd: str = "",
 ) -> list[str]:
@@ -204,6 +215,13 @@ def build_args(
             args[-1:-1] = ["-c", f"developer_instructions={json.dumps(ctx['system_prompt'], ensure_ascii=False)}"]
         else:
             args.extend(["-c", f"developer_instructions={json.dumps(ctx['system_prompt'], ensure_ascii=False)}"])
+
+    if is_codex:
+        fast_args = _codex_fast_mode_args(fast)
+        if args and args[-1] == prompt:
+            args[-1:-1] = fast_args
+        else:
+            args.extend(fast_args)
 
     return args
 

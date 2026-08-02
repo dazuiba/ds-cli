@@ -4,28 +4,32 @@
 
 本文档解释 handoff 的几个关键设计决策。
 
-## 为什么统一使用 skill
+## 为什么 Claude Code 用 skill、Codex 用 custom agent
 
-Handoff 将同一组 skills 安装到 Claude Code 和 Codex 的标准 skill 目录，避免为每个
-宿主维护不同的调用协议。`handoff init` 自动发现所有内置 `SKILL.md`：
+两个宿主都先用 `handoff new --write` 创建规范的 prompt 文件并确定 run ID，但等待
+机制不能共用：
 
-- Claude Code 使用软链接安装到 `~/.claude/skills/`，便于看到与源码的关联。
-- Codex 使用硬链接安装到 `~/.codex/skills/`；旧版
-  `~/.codex/agents/handoff-*.toml` 会被重命名为 `.removed.bak`，不会直接删除。
-- Claude Code 不安装 `handoff-opus`，避免宿主模型把“请 Opus 处理”误解为再次派发。
-- Codex 侧的 `handoff-codex` 带有 `agents/openai.yaml`，只允许显式调用。
+**Claude Code — 后台 shell skill**
 
-skill 内部先通过 `handoff new --write` 创建规范的 prompt 文件并确定 run ID，再调用
-`handoff run` 或 `handoff resume`。因此任务启动前即可知道 `.result.md` 路径，不必从
-长时间运行的命令输出中捕获路径。
+- 后台 shell 完成时会主动通知当前会话，不需要轮询。
+- 实时进度留在 shell view，不进入主会话上下文。
+- `handoff init` 把 `handoff-ds`、`handoff-gemini`、`handoff-codex` 三个 skills
+  软链接到 `~/.claude/skills/`。
 
-在 Claude Code 中，skill 使用后台 shell：
+**Codex — custom agent**
 
-- 能以**通知**方式感知任务完成——不需要轮询
-- 展开后台 shell 就能看到实时进度（stderr），走 shell view，**不烧主会话上下文**
-- 主 session 全程不阻塞、几乎不耗 token
+- 后台 terminal 进程退出时不会唤醒已经 idle 的主线程；主线程必须主动
+  `write_stdin` 才能取得完成状态。
+- Codex 能感知 subagent 完成事件。因此 custom agent 在自己的线程中阻塞执行
+  `handoff run`，必要时持续读取同一个 terminal session；进程退出后只向父线程返回
+  `RESULT=` 路径。
+- `handoff init` 把 `handoff-ds`、`handoff-gemini`、`handoff-opus` 三个 TOML
+  硬链接到 `~/.codex/agents/`，不再向 `~/.codex/skills/` 安装 handoff skill。
 
-Codex 从自己的 skill 目录加载同名说明，不再依赖单独的 `.toml` agent 定义。
+Claude 的通用 backend skills 与 Codex custom agents 各自以 `handoff-ds` 为母版，
+Makefile 在开发阶段生成 Gemini/Opus 变体。带 Pro/Fast 专属协议的
+`handoff-codex/SKILL.md` 单独维护。发布包携带生成后的完整文件；初始化阶段只负责
+链接，不需要模板引擎。
 
 ## RESULT= 协议
 
@@ -47,7 +51,7 @@ RESULT=~/.handoff/tasks/hd-0611-03.result.md
 - 进度同时落盘到 `.out.txt`（与 `RESULT=` 路径同名，后缀换 `.out.txt`）
 - 输入落盘到 `.prompt.txt`
 
-这个极简协议让 handoff 能对接任何能执行 shell 命令的 AI 平台——skill 只需确定结果路径，其余全部交给文件系统。
+这个极简协议让 handoff 能对接任何能执行 shell 命令的 AI 平台——skill 或 custom agent 只需确定结果路径，其余全部交给文件系统。
 
 ## codex 集成
 

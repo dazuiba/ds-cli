@@ -33,14 +33,18 @@ __HF_EOF__
 | `~/.handoff/tasks/<RUN_ID>.result.md` | **结果**，任务完成后读这个 |
 | `~/.handoff/tasks/<RUN_ID>.out.txt` | 进度日志，仅诊断时才读 |
 
-## 第 2 步：执行（必须 `run_in_background: true`）
+## 第 2 步：按参数表执行（必须 `run_in_background: true`）
 
-```bash
-handoff run --backend codex ~/.handoff/tasks/<RUN_ID>.prompt.md
-```
+根据用户本轮要求，只能选择下表对应的一行，不得自行增删 `--pro` / `--fast`：
 
-必须后台启动——handoff 耗时 2~20 分钟，前台会阻塞整个会话。
-用户提到 `pro`（或要求更强/专业模型处理复杂任务）时，在 `handoff run` 后加 `--pro`。
+| 用户本轮要求 | 新会话：`run` | 续接：`resume` | 后续行为 |
+| --- | --- | --- | --- |
+| 未提 Pro，也未提 Fast | `handoff run --backend codex ~/.handoff/tasks/<RUN_ID>.prompt.md` | `handoff resume <首次RUN_ID> --backend codex ~/.handoff/tasks/<新RUN_ID>.prompt.md` | resume 自动继承会话上一轮的 Pro 状态；Fast 关闭 |
+| Pro（或要求更强/专业模型） | `handoff run --backend codex --pro ~/.handoff/tasks/<RUN_ID>.prompt.md` | `handoff resume <首次RUN_ID> --backend codex --pro ~/.handoff/tasks/<新RUN_ID>.prompt.md` | Pro 状态持久化，后续 resume 自动继承 |
+| Fast / Fast Mode / 明确要求加速 | `handoff run --backend codex --fast ~/.handoff/tasks/<RUN_ID>.prompt.md` | `handoff resume <首次RUN_ID> --backend codex --fast ~/.handoff/tasks/<新RUN_ID>.prompt.md` | Fast 只对本轮有效，下次 resume 默认关闭 |
+| 同时要求 Pro + Fast | `handoff run --backend codex --pro --fast ~/.handoff/tasks/<RUN_ID>.prompt.md` | `handoff resume <首次RUN_ID> --backend codex --pro --fast ~/.handoff/tasks/<新RUN_ID>.prompt.md` | Pro 持久化；Fast 只对本轮有效 |
+
+必须后台启动——handoff 耗时 2~20 分钟，前台会阻塞整个会话。Fast Mode 会以更高倍率消耗 credits。
 
 ## 第 3 步：等通知，然后读结果
 
@@ -69,17 +73,15 @@ handoff run --backend codex ~/.handoff/tasks/<RUN_ID>.prompt.md
 要保留某次任务的上下文继续，而非开新会话：第 1 步照旧建新的 prompt 文件，第 2 步把 `run` 换成 `resume <首次RUN_ID>`：
 
 ```bash
-# 第 1 步：同上，拿到新的 <RUN_ID>
 handoff new --backend codex --slug <任务助记词> --write <<'__HF_EOF__'
 [后续任务内容]
 __HF_EOF__
-
-# 第 2 步：run_in_background: true
-handoff resume <首次RUN_ID> --backend codex ~/.handoff/tasks/<新RUN_ID>.prompt.md
 ```
+
+然后从上方参数表的“续接：`resume`”列复制与用户本轮要求匹配的完整命令，并以 `run_in_background: true` 执行。
 
 - `<首次RUN_ID>` 是该会话**首次**任务的 RUN_ID；它是稳定句柄，每轮续接都用它，不要追每轮新生成的 RUN_ID。
 - 本轮结果落在**新** RUN_ID 的 `.result.md`，读这个。
 - **必须带 prompt 文件**：不带输入文件的 `resume <RUN_ID>` 是交互式重开，后台会卡死。
-- 续接默认只继承 backend；原会话用过 `--pro` 的，续接要再次带上才沿用 pro_model。
+- `--pro` / `--fast` 的选择只以上方参数表为准，不要从其它段落推断。
 - 不确定用户指哪次任务时，报候选 RUN_ID + 摘要让其确认，别猜。
